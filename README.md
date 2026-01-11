@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>포타 명대사 공유</title>
+<style>
+body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:#f2f7f9; color:#333; padding:1rem; max-width:700px; margin:auto; }
+h2 { color:#1d3557; font-weight:bold; margin-bottom:0.3rem; }
+input, textarea, button { width:100%; padding:0.6rem; margin-top:0.5rem; border-radius:6px; border:1px solid #ccc; box-sizing:border-box; font-size:1rem; font-family:inherit; }
+#quoteText, .commentInput { min-height:80px; overflow:hidden; resize:none; font-weight:400; font-size:1.05rem; }
+button { background:#457b9d; color:white; border:none; cursor:pointer; transition:0.2s; font-weight:bold; }
+button:hover { background:#1d3557; }
+#refreshBtn { background:#a8dadc; color:#1d3557; font-size:0.9rem; margin-top:0.3rem; }
+#refreshBtn:hover { background:#7fc8d5; }
+
+.quote { border-radius:8px; padding:0.8rem; margin-top:0.5rem; background:#fff; box-shadow:0 3px 8px rgba(0,0,0,0.08); position:relative; font-weight:400; font-size:1.05rem; line-height:1.4; white-space:pre-line; cursor:pointer; }
+.quote-title { font-weight:700; margin-bottom:0.2rem; color:#1d3557; }
+.quote-text { font-weight:400; margin:0; white-space:pre-line; }
+.userId { font-size:0.85rem; color:#555; margin-left:0.3rem; }
+
+.actionButtons { position:absolute; bottom:5px; right:5px; display:flex; gap:5px; font-size:0.85rem; }
+.likeBtn { background:#fff; border:1px solid #ccc; border-radius:6px; padding:3px 6px; cursor:pointer; color:gray; font-weight:bold; }
+.likeBtn.liked { color:#e63946; border-color:#e63946; }
+.editBtn, .deleteBtn { font-weight:bold; cursor:pointer; border-radius:6px; padding:3px 6px; border:none; font-size:0.85rem; }
+.editBtn { background:#f4a261; color:white; }
+.deleteBtn { background:#e63946; color:white; }
+
+.tags { margin-top:0.5rem; display:flex; flex-wrap:wrap; gap:0.3rem; }
+.tag { display:inline-block; background:#d0f0ff; padding:0.2rem 0.5rem; border-radius:4px; cursor:pointer; font-size:0.85rem; }
+
+#quotesList { max-height:500px; overflow-y:auto; margin-top:0.5rem; padding:0.5rem; border-radius:6px; background:#e9f5f9; }
+#alertBox { position:fixed; top:20px; left:50%; transform:translateX(-50%); background:#457b9d; color:white; padding:0.5rem 1rem; border-radius:6px; display:none; }
+
+.commentSection { margin-top:0.5rem; padding:0.5rem; background:#f0f8ff; border-radius:6px; display:none; }
+.comment { background:#fff3f0; padding:0.4rem 0.6rem; border-radius:6px; margin-bottom:0.3rem; font-size:0.9rem; line-height:1.3; }
+.comment-user { font-weight:700; margin-right:0.3rem; color:#1d3557; }
+.comment-time { font-size:0.75rem; color:#888; margin-left:0.3rem; }
+
+.commentInput { margin-top:0.3rem; border:1px solid #ccc; border-radius:6px; padding:0.4rem; min-height:50px; }
+.commentAddBtn { background:#5489ad; color:white; border:none; border-radius:6px; padding:0.4rem; margin-top:0.2rem; cursor:pointer; font-weight:bold; }
+.commentAddBtn:hover { background:#5489ad; }
+
+@media (max-width:480px){
+  body{padding:0.5rem;} 
+  textarea,input,button{font-size:0.95rem;} 
+  .quote{font-size:1rem;} 
+  #quoteText{min-height:80px;}
+}
+</style>
+</head>
+<body>
+
+<div id="alertBox"></div>
+
+<h2>포타 명대사 검색</h2>
+<input type="text" id="potaInput" placeholder="포타 이름/키워드/해시태그 입력" onkeydown="enterSearch(event)">
+<button onclick="searchQuotes()">검색</button>
+<button id="refreshBtn" onclick="refreshPage()">새로고침</button>
+
+<div id="quotesList"></div>
+
+<hr>
+<h2>명대사 추가</h2>
+<input type="text" id="userId" placeholder="사용자 아이디 입력 (선택)">
+<input type="text" id="potaName" placeholder="포타 이름">
+<textarea id="quoteText" placeholder="명대사 입력" oninput="autoResize(this)"></textarea>
+<input type="text" id="tagsInput" placeholder="#태그">
+<button onclick="event.stopPropagation(); addQuote()">추가</button>
+
+<script>
+let quotes = JSON.parse(localStorage.getItem("userQuotes")||"[]");
+let likedQuotes = JSON.parse(localStorage.getItem("likedQuotes")||[]);
+
+const blockedCpRules = [
+  { rule:"startsWith", name:"마크" },
+  { rule:"startsWith", name:"맠" },
+  { rule: "startsWith", name:"민형"},
+  { rule:"endsWith", name:"동" },
+  { rule:"endsWith", name:"동혁"},
+  { rule:"endsWith", name:"해찬"},
+  { rule:"endsWith", name:"찬"}
+];
+
+function showAlert(msg){
+  const alertBox=document.getElementById("alertBox");
+  alertBox.textContent=msg;
+  alertBox.style.display="block";
+  setTimeout(()=>{ alertBox.style.display="none"; },1200);
+}
+
+function isBlockedCp(tag){
+  tag = tag.replace(/^#/, "");
+  for(let r of blockedCpRules){
+    if(r.rule==="startsWith" && tag.startsWith(r.name)) return true;
+    if(r.rule==="endsWith" && tag.endsWith(r.name)) return true;
+    if(r.rule==="exact" && tag===r.name) return true;
+  }
+  return false;
+}
+
+function autoResize(el){ el.style.height="auto"; el.style.height=(el.scrollHeight)+"px"; }
+function enterSearch(e){ if(e.key==="Enter"){ e.preventDefault(); searchQuotes(); } }
+function saveData(){ localStorage.setItem("userQuotes", JSON.stringify(quotes)); localStorage.setItem("likedQuotes", JSON.stringify(likedQuotes)); }
+
+function searchQuotes(){
+  const keyword = document.getElementById("potaInput").value.toLowerCase().trim();
+  let filtered = quotes;
+  if(keyword){
+    filtered = quotes.filter(q=>{
+      const potaMatch = q.pota.toLowerCase().includes(keyword);
+      const textMatch = q.text.toLowerCase().includes(keyword);
+      const tagMatch = q.cpTags && q.cpTags.some(t=>t.toLowerCase().includes(keyword));
+      return potaMatch || textMatch || tagMatch;
+    });
+  }
+  filtered = filtered.slice().reverse();
+  displayFilteredQuotes(filtered);
+}
+
+function displayFilteredQuotes(filtered){
+  const listDiv=document.getElementById("quotesList");
+  listDiv.innerHTML="";
+
+  filtered.forEach((q)=>{
+    const index = quotes.indexOf(q);
+    const div=document.createElement("div"); 
+    div.className="quote";
+    const liked = likedQuotes.includes(index);
+    const userDisplay = q.userId ? `(${q.userId})` : "";
+    div.innerHTML=`<div class="quote-title">${q.pota}${userDisplay?` ${userDisplay}`:""}</div>
+                     <div class="quote-text">${q.text}</div>`;
+
+    if(q.cpTags && q.cpTags.length>0){
+      const tagsDiv=document.createElement("div");
+      tagsDiv.className="tags";
+      q.cpTags.forEach(tag=>{
+        const span=document.createElement("span");
+        span.className="tag";
+        span.textContent=tag;
+        span.onclick=(e)=>{ e.stopPropagation(); searchByTag(tag); };
+        tagsDiv.appendChild(span);
+      });
+      div.appendChild(tagsDiv);
+    }
+
+    const actionDiv=document.createElement("div"); 
+    actionDiv.className="actionButtons";
+
+    const likeBtn=document.createElement("button"); 
+    likeBtn.className="likeBtn"; 
+    likeBtn.textContent=`♥ ${q.likes}`;
+    if(liked) likeBtn.classList.add("liked");
+    likeBtn.onclick=(e)=>{ e.stopPropagation(); toggleLike(index,likeBtn); };
+    actionDiv.appendChild(likeBtn);
+
+    const editBtn=document.createElement("button"); editBtn.className="editBtn"; editBtn.textContent="수정";
+    editBtn.onclick=(e)=>{ e.stopPropagation(); editQuote(index); };
+    const delBtn=document.createElement("button"); delBtn.className="deleteBtn"; delBtn.textContent="삭제";
+    delBtn.onclick=(e)=>{ e.stopPropagation(); deleteQuote(index); };
+    actionDiv.appendChild(editBtn); actionDiv.appendChild(delBtn);
+
+    div.appendChild(actionDiv);
+
+    // 댓글 영역
+    const commentSection=document.createElement("div");
+    commentSection.className="commentSection";
+
+    const commentList=document.createElement("div");
+    commentSection.appendChild(commentList);
+
+    const commentInput=document.createElement("textarea");
+    commentInput.className="commentInput";
+    commentInput.placeholder="댓글 입력";
+    commentSection.appendChild(commentInput);
+
+    const commentBtn=document.createElement("button");
+    commentBtn.className="commentAddBtn";
+    commentBtn.textContent="댓글 추가";
+    commentBtn.onclick=(e)=>{ e.stopPropagation(); addComment(index, commentInput.value, commentList); commentInput.value=""; };
+    commentSection.appendChild(commentBtn);
+
+    div.appendChild(commentSection);
+
+    div.onclick=(e)=>{
+      if(e.target.tagName!=="BUTTON" && e.target.className.indexOf("tag")===-1 && !e.target.closest(".commentSection")){
+        commentSection.style.display = commentSection.style.display==="block" ? "none" : "block";
+      }
+    };
+
+    listDiv.appendChild(div);
+
+    if(q.comments) displayComments(q.comments, commentList);
+  });
+  listDiv.scrollTop=0;
+}
+
+function addComment(index, text, listDiv){
+  text=text.trim();
+  if(!text) return;
+  const comment={text, time:new Date().toLocaleString()};
+  if(!quotes[index].comments) quotes[index].comments=[];
+  quotes[index].comments.push(comment);
+  saveData();
+  displayComments(quotes[index].comments, listDiv);
+}
+
+function displayComments(comments, listDiv){
+  listDiv.innerHTML="";
+  comments.forEach((c)=>{
+    const div=document.createElement("div");
+    div.className="comment";
+    div.innerHTML=`<span class="comment-user">익명</span><span>${c.text}</span><span class="comment-time">${c.time}</span>`;
+    listDiv.appendChild(div);
+  });
+}
+
+function searchByTag(tag){
+  document.getElementById("potaInput").value="";
+  const filtered=quotes.filter(q=>q.cpTags && q.cpTags.includes(tag));
+  displayFilteredQuotes(filtered);
+}
+
+function toggleLike(index,btn){
+  if(likedQuotes.includes(index)){ likedQuotes=likedQuotes.filter(i=>i!==index); quotes[index].likes--; btn.classList.remove("liked"); }
+  else{ likedQuotes.push(index); quotes[index].likes++; btn.classList.add("liked"); }
+  saveData();
+  searchQuotes();
+}
+
+function addQuote(){
+  const userId=document.getElementById("userId").value.trim();
+  const pota=document.getElementById("potaName").value.trim();
+  const text=document.getElementById("quoteText").value.trim();
+  const tags=document.getElementById("tagsInput").value.split(",").map(t=>t.trim()).filter(t=>t);
+
+  if(!pota||!text) return alert("포타 이름과 명대사를 모두 입력하세요.");
+  for(let t of tags) if(isBlockedCp(t)) return alert(`차단된 CP 태그: ${t}`);
+
+  quotes.push({userId,pota,text,cpTags:tags,likes:0,comments:[]});
+  saveData();
+  document.getElementById("potaName").value=""; 
+  document.getElementById("quoteText").value=""; 
+  document.getElementById("tagsInput").value="";
+  showAlert("명대사가 추가되었습니다.");
+  searchQuotes();
+}
+
+function deleteQuote(index){ if(!confirm("삭제하시겠습니까?")) return; quotes.splice(index,1); saveData(); searchQuotes(); }
+function editQuote(index){ 
+  const quote=quotes[index]; 
+  const editBox=document.createElement("div");
+  editBox.style.position="fixed"; editBox.style.top="50%"; editBox.style.left="50%";
+  editBox.style.transform="translate(-50%,-50%)"; editBox.style.background="#fff";
+  editBox.style.padding="1rem"; editBox.style.border="1px solid #ccc"; editBox.style.borderRadius="8px";
+  const textarea=document.createElement("textarea"); textarea.value=quote.text; textarea.style.width="300px"; textarea.style.height="100px";
+  editBox.appendChild(textarea);
+  const saveBtn=document.createElement("button"); saveBtn.textContent="저장"; saveBtn.style.marginTop="0.5rem";
+  saveBtn.onclick=()=>{ quote.text=textarea.value.trim(); saveData(); document.body.removeChild(editBox); searchQuotes(); };
+  editBox.appendChild(saveBtn);
+  const cancelBtn=document.createElement("button"); cancelBtn.textContent="취소"; cancelBtn.style.marginLeft="0.5rem";
+  cancelBtn.onclick=()=>{ document.body.removeChild(editBox); };
+  editBox.appendChild(cancelBtn);
+  document.body.appendChild(editBox);
+}
+
+function refreshPage(){ saveData(); location.reload(); }
+
+searchQuotes();
+</script>
+</body>
+</html>
